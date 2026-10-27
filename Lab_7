@@ -1,0 +1,455 @@
+// ============================================================
+// FILE 1: database/migrations/xxxx_xx_xx_create_books_table.php
+// ============================================================
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('books', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
+            $table->string('title', 150);
+            $table->string('author', 100);
+            $table->unsignedInteger('pages');
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('books');
+    }
+};
+
+
+// ============================================================
+// FILE 2: app/Models/Book.php
+// ============================================================
+
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class Book extends Model
+{
+    use HasFactory;
+
+    // Fields allowed for mass assignment
+    protected $fillable = [
+        'user_id',
+        'title',
+        'author',
+        'pages',
+    ];
+
+    // Each book belongs to one user
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+}
+
+
+// ============================================================
+// FILE 3: app/Models/User.php
+// IMPORTANT: Add this method inside your existing User class.
+// Do not delete your existing authentication code.
+// ============================================================
+
+// Add this import near the other imports at the top:
+// use Illuminate\Database\Eloquent\Relations\HasMany;
+
+// Add this method inside the User class:
+
+public function books(): HasMany
+{
+    return $this->hasMany(\App\Models\Book::class);
+}
+
+
+// ============================================================
+// FILE 4: app/Http/Controllers/BookController.php
+// ============================================================
+
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Book;
+use Illuminate\Http\Request;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\View\View;
+
+class BookController extends Controller
+{
+    // Display the dashboard and the authenticated user's books
+    public function index(): View
+    {
+        $books = Book::where('user_id', auth()->id())
+            ->latest()
+            ->get();
+
+        return view('dashboard', compact('books'));
+    }
+
+    // Validate and store a new book
+    public function store(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:150'],
+            'author' => ['required', 'string', 'max:100'],
+            'pages' => ['required', 'integer', 'min:1', 'max:10000'],
+        ]);
+
+        // Assign the authenticated user's ID
+        $validated['user_id'] = auth()->id();
+
+        // Save the book
+        Book::create($validated);
+
+        // Redirect with a success message
+        return redirect()
+            ->route('dashboard')
+            ->with('success', 'Book registered successfully!');
+    }
+}
+
+
+// ============================================================
+// FILE 5: routes/web.php
+// IMPORTANT: Preserve your existing authentication routes if
+// their controller methods or view names are different.
+// Do not create duplicate dashboard routes.
+// ============================================================
+
+<?php
+
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BookController;
+
+// Redirect homepage to login
+Route::redirect('/', '/login');
+
+// Routes available only to guests
+Route::middleware('guest')->group(function () {
+
+    Route::get('/register', function () {
+        return view('auth.register');
+    })->name('register');
+
+    Route::post('/register', [AuthController::class, 'register'])
+        ->name('register.store');
+
+    Route::get('/login', function () {
+        return view('auth.login');
+    })->name('login');
+
+    Route::post('/login', [AuthController::class, 'login'])
+        ->name('login.store');
+});
+
+// Routes available only to authenticated users
+Route::middleware('auth')->group(function () {
+
+    // Dashboard and registered books
+    Route::get('/dashboard', [BookController::class, 'index'])
+        ->name('dashboard');
+
+    // Register a book
+    Route::post('/books', [BookController::class, 'store'])
+        ->name('books.store');
+
+    // Logout
+    Route::post('/logout', [AuthController::class, 'logout'])
+        ->name('logout');
+});
+
+
+// ============================================================
+// FILE 6: resources/views/dashboard.blade.php
+// ============================================================
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>My Reading List</title>
+
+    <!-- Bootstrap CSS -->
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+    >
+</head>
+
+<body class="bg-light">
+
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container">
+
+            <a class="navbar-brand" href="{{ route('dashboard') }}">
+                Book Registration
+            </a>
+
+            <!-- Logout Form -->
+            <form action="{{ route('logout') }}" method="POST">
+                @csrf
+
+                <button type="submit" class="btn btn-light">
+                    Logout
+                </button>
+            </form>
+
+        </div>
+    </nav>
+
+    <main class="container py-5">
+
+        <!-- Welcome Section -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+
+                <h2 class="mb-3">
+                    Welcome, {{ auth()->user()->name }}!
+                </h2>
+
+                <p class="mb-1">
+                    <strong>Name:</strong>
+                    {{ auth()->user()->name }}
+                </p>
+
+                <p class="mb-0">
+                    <strong>Email:</strong>
+                    {{ auth()->user()->email }}
+                </p>
+
+            </div>
+        </div>
+
+        <!-- Success Message -->
+        @if (session('success'))
+            <div class="alert alert-success alert-dismissible fade show">
+                {{ session('success') }}
+
+                <button
+                    type="button"
+                    class="btn-close"
+                    data-bs-dismiss="alert"
+                    aria-label="Close"
+                ></button>
+            </div>
+        @endif
+
+        <!-- Validation Errors -->
+        @if ($errors->any())
+            <div class="alert alert-danger">
+                <strong>Please correct the following errors:</strong>
+
+                <ul class="mb-0 mt-2">
+                    @foreach ($errors->all() as $error)
+                        <li>{{ $error }}</li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
+
+        <!-- Book Registration Form -->
+        <div class="card shadow-sm mb-5">
+
+            <div class="card-header bg-white">
+                <h4 class="mb-0">Register a New Book</h4>
+            </div>
+
+            <div class="card-body">
+
+                <form action="{{ route('books.store') }}" method="POST">
+                    @csrf
+
+                    <!-- Book Title -->
+                    <div class="mb-3">
+                        <label for="title" class="form-label">
+                            Book Title
+                        </label>
+
+                        <input
+                            type="text"
+                            id="title"
+                            name="title"
+                            class="form-control @error('title') is-invalid @enderror"
+                            value="{{ old('title') }}"
+                            maxlength="150"
+                            required
+                        >
+
+                        @error('title')
+                            <div class="invalid-feedback">
+                                {{ $message }}
+                            </div>
+                        @enderror
+                    </div>
+
+                    <!-- Author -->
+                    <div class="mb-3">
+                        <label for="author" class="form-label">
+                            Author
+                        </label>
+
+                        <input
+                            type="text"
+                            id="author"
+                            name="author"
+                            class="form-control @error('author') is-invalid @enderror"
+                            value="{{ old('author') }}"
+                            maxlength="100"
+                            required
+                        >
+
+                        @error('author')
+                            <div class="invalid-feedback">
+                                {{ $message }}
+                            </div>
+                        @enderror
+                    </div>
+
+                    <!-- Number of Pages -->
+                    <div class="mb-3">
+                        <label for="pages" class="form-label">
+                            Number of Pages
+                        </label>
+
+                        <input
+                            type="number"
+                            id="pages"
+                            name="pages"
+                            class="form-control @error('pages') is-invalid @enderror"
+                            value="{{ old('pages') }}"
+                            min="1"
+                            max="10000"
+                            required
+                        >
+
+                        @error('pages')
+                            <div class="invalid-feedback">
+                                {{ $message }}
+                            </div>
+                        @enderror
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" class="btn btn-primary">
+                        Register Book
+                    </button>
+
+                </form>
+            </div>
+        </div>
+
+        <!-- Registered Books Table -->
+        <div class="card shadow-sm">
+
+            <div class="card-header bg-white">
+                <h4 class="mb-0">My Books</h4>
+            </div>
+
+            <div class="card-body">
+
+                @if ($books->isEmpty())
+
+                    <!-- Empty List Message -->
+                    <div class="alert alert-info mb-0">
+                        You have not registered any books yet.
+                    </div>
+
+                @else
+
+                    <div class="table-responsive">
+
+                        <table class="table table-bordered table-striped align-middle">
+
+                            <thead class="table-primary">
+                                <tr>
+                                    <th>No.</th>
+                                    <th>Title</th>
+                                    <th>Author</th>
+                                    <th>Pages</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                @foreach ($books as $book)
+                                    <tr>
+                                        <td>{{ $loop->iteration }}</td>
+                                        <td>{{ $book->title }}</td>
+                                        <td>{{ $book->author }}</td>
+                                        <td>{{ $book->pages }}</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                @endif
+
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Bootstrap JavaScript -->
+    <script
+        src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+    ></script>
+
+</body>
+</html>
+
+
+// ============================================================
+// TERMINAL COMMANDS
+// Run these commands separately in your Laravel project.
+// ============================================================
+
+// Create the model and migration:
+// php artisan make:model Book -m
+
+// Create the controller:
+// php artisan make:controller BookController
+
+// Run migrations:
+// php artisan migrate
+
+// Start the development server:
+// php artisan serve
+
+
+// ============================================================
+// LAB TEST DATA
+// Enter these records through the dashboard form.
+// ============================================================
+
+// Book 1:
+// Title: Learning PHP
+// Author: Sara Ahmad
+// Pages: 120
+
+// Book 2:
+// Title: Laravel Basics
+// Author: Ali Hassan
+// Pages: 180
